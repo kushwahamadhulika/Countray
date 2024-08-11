@@ -1,0 +1,171 @@
+data class Country(
+    val id: Int,
+    val name: String
+)
+
+data class State(
+    val id: Int,
+    val countryId: Int, // Assuming state belongs to a country
+    val name: String
+)
+
+//////////////////////////////////////////////////////////////////
+
+
+
+import retrofit2.Call
+import retrofit2.http.GET
+
+interface ApiService {
+    @GET("countries")
+    fun getCountries(): Call<List<Country>>
+
+    @GET("states")
+    fun getStates(): Call<List<State>>
+}
+
+///////////////////////////////////////////////////////////////////
+
+
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
+
+class CountryStateRepository(private val apiService: ApiService) {
+
+    fun getCountries(): LiveData<List<Country>> {
+        val data = MutableLiveData<List<Country>>()
+
+        apiService.getCountries().enqueue(object : Callback<List<Country>> {
+            override fun onResponse(call: Call<List<Country>>, response: Response<List<Country>>) {
+                data.value = response.body()
+            }
+
+            override fun onFailure(call: Call<List<Country>>, t: Throwable) {
+                // Handle error
+            }
+        })
+
+        return data
+    }
+
+    fun getStates(): LiveData<List<State>> {
+        val data = MutableLiveData<List<State>>()
+
+        apiService.getStates().enqueue(object : Callback<List<State>> {
+            override fun onResponse(call: Call<List<State>>, response: Response<List<State>>) {
+                data.value = response.body()
+            }
+
+            override fun onFailure(call: Call<List<State>>, t: Throwable) {
+                // Handle error
+            }
+        })
+
+        return data
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+
+class CountryViewModel(private val repository: CountryStateRepository) : ViewModel() {
+    val countries: LiveData<List<Country>> = repository.getCountries()
+}
+
+class StateViewModel(private val repository: CountryStateRepository) : ViewModel() {
+    val states: LiveData<List<State>> = repository.getStates()
+}
+
+class ViewModelFactory(private val repository: CountryStateRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(CountryViewModel::class.java)) {
+            return CountryViewModel(repository) as T
+        }
+        if (modelClass.isAssignableFrom(StateViewModel::class.java)) {
+            return StateViewModel(repository) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
+
+/////////////////////////////////////////////////////////////
+
+
+import android.os.Bundle
+import android.view.MenuInflater
+import android.view.View
+import android.widget.Button
+import android.widget.PopupMenu
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Observer
+import androidx.lifecycle.ViewModelProvider
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+
+class MainActivity : AppCompatActivity() {
+
+    private val apiService: ApiService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://your-api-base-url/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ApiService::class.java)
+    }
+
+    private val repository: CountryStateRepository by lazy {
+        CountryStateRepository(apiService)
+    }
+
+    private val countryViewModel: CountryViewModel by viewModels {
+        ViewModelFactory(repository)
+    }
+
+    private val stateViewModel: StateViewModel by viewModels {
+        ViewModelFactory(repository)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        val button: Button = findViewById(R.id.button_show_menu)
+
+        countryViewModel.countries.observe(this, Observer { countries ->
+            stateViewModel.states.observe(this, Observer { states ->
+                button.setOnClickListener {
+                    showPopupMenu(button, countries, states)
+                }
+            })
+        })
+    }
+
+    private fun showPopupMenu(view: View, countries: List<Country>, states: List<State>) {
+        val popupMenu = PopupMenu(this, view)
+        val menuInflater: MenuInflater = popupMenu.menuInflater
+
+        popupMenu.menu.clear() // Clear existing menu items
+
+        // Add countries to the popup menu
+        countries.forEach { country ->
+            val countryMenuItem = popupMenu.menu.add(country.name)
+            // Add sub-menu for states
+            val stateSubMenu = popupMenu.menu.addSubMenu("States of ${country.name}")
+            states.filter { it.countryId == country.id }.forEach { state ->
+                stateSubMenu.add(state.name)
+            }
+        }
+
+        popupMenu.show()
+    }
+}
+
+/////////////////////////////////////////////////
